@@ -202,3 +202,92 @@ export const updateServiceDocumentRequirementValidation = [
     .withMessage("Invalid status"),
   handleValidationErrors,
 ];
+
+export const initiateServiceRequestValidation = [
+  body("service_category")
+    .notEmpty()
+    .withMessage("Service category is required")
+    .isMongoId()
+    .withMessage("Invalid service category id"),
+  body("child_category")
+    .optional({ values: "falsy" })
+    .isMongoId()
+    .withMessage("Invalid child category id"),
+  body("frequency")
+    .isIn(["One-time service", "Daily", "Weekly", "Bi-weekly", "Monthly"])
+    .withMessage("Invalid frequency"),
+  body("selected_options")
+    .optional()
+    .isArray()
+    .withMessage("selected_options must be an array"),
+  body("address").notEmpty().withMessage("Address is required"),
+  body("contact_details.first_name")
+    .notEmpty()
+    .withMessage("First name is required"),
+  body("contact_details.last_name")
+    .notEmpty()
+    .withMessage("Last name is required"),
+  body("contact_details.client_type")
+    .isIn(["Individual", "Company"])
+    .withMessage("Invalid client type"),
+  body("contact_details.phone")
+    .notEmpty()
+    .withMessage("Phone is required"),
+  body("contact_details.email")
+    .isEmail()
+    .withMessage("Valid email is required"),
+  handleValidationErrors,
+];
+
+export const resendServiceRequestOTPValidation = [
+  body("request_id")
+    .notEmpty()
+    .withMessage("Request id is required")
+    .isMongoId()
+    .withMessage("Invalid request id"),
+  handleValidationErrors,
+];
+
+export const verifyServiceRequestOTPValidation = [
+  body("request_id")
+    .notEmpty()
+    .withMessage("Request id is required")
+    .isMongoId()
+    .withMessage("Invalid request id"),
+  body("email_otp")
+    .isLength({ min: 4, max: 4 })
+    .withMessage("Email OTP must be 4 digits"),
+  body("phone_otp")
+    .isLength({ min: 4, max: 4 })
+    .withMessage("Phone OTP must be 4 digits"),
+  handleValidationErrors,
+];
+
+export const loginAndAttachServiceRequestValidation = [
+  body("request_id")
+    .notEmpty()
+    .withMessage("Request id is required")
+    .isMongoId()
+    .withMessage("Invalid request id"),
+  body("email_or_phone")
+    .notEmpty()
+    .withMessage("Email or phone is required"),
+  body("password")
+    .isLength({ min: 8 })
+    .withMessage("Password must be at least 8 characters"),
+  handleValidationErrors,
+];
+
+export const createVendorReviewValidation = [
+  body("vendor")
+    .notEmpty()
+    .withMessage("Vendor is required")
+    .isMongoId()
+    .withMessage("Invalid vendor id"),
+  body("rating")
+    .isFloat({ min: 1, max: 5 })
+    .withMessage("Rating must be between 1 and 5"),
+  body("review").optional().isString().withMessage("Review must be a string"),
+  handleValidationErrors,
+];
+
