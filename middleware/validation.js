@@ -290,3 +290,4 @@ export const createVendorReviewValidation = [
   body("review").optional().isString().withMessage("Review must be a string"),
   handleValidationErrors,
 ];
+
