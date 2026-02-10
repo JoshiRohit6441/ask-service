@@ -2,7 +2,7 @@
   "name": "ask-service",
   "version": "1.0.0",
   "description": "",
-  "type":"module",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -31,6 +31,7 @@
     "express-validator": "^7.3.0",
     "firebase-admin": "^13.6.0",
     "fs": "^0.0.1-security",
+    "google-auth-library": "^10.5.0",
     "helmet": "^8.1.0",
     "json2csv": "^6.0.0-alpha.2",
     "jsonwebtoken": "^9.0.2",
