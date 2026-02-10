@@ -5,6 +5,10 @@ import {
   generateOTP,
   generateToken,
 } from "../../../utils/auth.js";
+import { OAuth2Client } from "google-auth-library";
+import Role from "../../models/RoleModel.js";
+
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // signup
 export const signup = async (req, resp) => {
@@ -92,13 +96,7 @@ export const signup = async (req, resp) => {
 // verify signup
 export const verifySignup = async (req, resp) => {
   try {
-    const {
-      email,
-      phone,
-      otp_email,
-      otp_phone,
-      type = "SIGNUP",
-    } = req.body;
+    const { email, phone, otp_email, otp_phone, type = "SIGNUP" } = req.body;
 
     const user = await User.findOne({
       $or: [{ email }, { phone }],
@@ -115,8 +113,7 @@ export const verifySignup = async (req, resp) => {
       if (!otp_email) errors.email = "Email OTP required";
       else if (moment().isAfter(user.otp_expires_at))
         errors.email = "Email OTP expired";
-      else if (user.otp !== otp_email)
-        errors.email = "Invalid Email OTP";
+      else if (user.otp !== otp_email) errors.email = "Invalid Email OTP";
       else {
         user.is_email_verified = true;
         user.otp = null;
@@ -129,8 +126,7 @@ export const verifySignup = async (req, resp) => {
       if (!otp_phone) errors.phone = "Phone OTP required";
       else if (moment().isAfter(user.otp_phone_expiry_at))
         errors.phone = "Phone OTP expired";
-      else if (user.otp_phone !== otp_phone)
-        errors.phone = "Invalid Phone OTP";
+      else if (user.otp_phone !== otp_phone) errors.phone = "Invalid Phone OTP";
       else {
         user.is_phone_verified = true;
         user.otp_phone = null;
@@ -149,7 +145,7 @@ export const verifySignup = async (req, resp) => {
           email_verified: user.is_email_verified,
           phone_verified: user.is_phone_verified,
         },
-        resp
+        resp,
       );
     }
 
@@ -167,7 +163,7 @@ export const verifySignup = async (req, resp) => {
           token,
           user,
         },
-        resp
+        resp,
       );
     }
 
@@ -180,7 +176,7 @@ export const verifySignup = async (req, resp) => {
         email_verified: user.is_email_verified,
         phone_verified: user.is_phone_verified,
       },
-      resp
+      resp,
     );
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
@@ -314,5 +310,61 @@ export const resendOTP = async (req, resp) => {
     );
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
+  }
+};
+
+// google login
+export const googleLogin = async (req, resp) => {
+  try {
+    const { id_token } = req.body;
+
+    if (!id_token) {
+      return handleResponse(400, "Google ID token required", {}, resp);
+    }
+
+    const ticket = await client.verifyIdToken({
+      idToken: id_token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+
+    const { email, given_name, family_name, email_verified } = payload;
+
+    if (!email || !email_verified) {
+      return handleResponse(401, "Google email not verified", {}, resp);
+    }
+
+    let user = await User.findOne({ email });
+
+    if (!user) {
+      const role = await Role.findOne({ name: "User" });
+
+      user = await User.create({
+        first_name: given_name || "Google",
+        last_name: family_name || "User",
+        email,
+        is_email_verified: true,
+        role: role._id,
+        password: await hashPassword(generatePassword(16)),
+        status: "ACTIVE",
+      });
+    }
+
+    const token = generateToken(user);
+
+    return handleResponse(
+      200,
+      "Login successful",
+      {
+        flow: "LOGIN_SUCCESS",
+        token,
+        user,
+      },
+      resp,
+    );
+  } catch (err) {
+    console.error("Google login error:", err);
+    return handleResponse(500, "Google authentication failed", {}, resp);
   }
 };

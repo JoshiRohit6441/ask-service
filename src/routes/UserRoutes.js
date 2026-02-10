@@ -9,7 +9,7 @@ import {
   checkRoleAuth,
   optionalAuthenticateToken,
 } from "../../middleware/auth.js";
-import { loginWithPassword, requestLoginOTP, resendOTP, signup, verifyLoginOTP, verifySignup } from "../controller/user/AuthController.js";
+import { googleLogin, loginWithPassword, requestLoginOTP, resendOTP, signup, verifyLoginOTP, verifySignup } from "../controller/user/AuthController.js";
 
 const router = express.Router();
 
@@ -42,6 +42,10 @@ router.post("/login/otp/verify", verifyLoginOTP);
 
 // resend otp
 router.post("/resend-otp", resendOTP);
+
+// google login
+router.post("/auth/google", googleLogin);
+
 
 
 
