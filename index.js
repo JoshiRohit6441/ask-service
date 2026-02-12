@@ -13,6 +13,7 @@ import logger from "./utils/logger.js";
 import cookieParser from "cookie-parser";
 import AdminRoutes from "./src/routes/AdminRoutes.js";
 import UserRoutes from "./src/routes/UserRoutes.js";
+import "./cron/serviceRequestExpiryCron.js"
 
 const app = express();
 app.set("trust proxy", 1);

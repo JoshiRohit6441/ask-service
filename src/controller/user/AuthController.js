@@ -497,3 +497,33 @@ export const updateUserProfile = async (req, resp) => {
     return handleResponse(500, err.message, {}, resp);
   }
 };
+
+// change password
+export const changePassword = async (req, resp) => {
+  try {
+    const { old_password, new_password } = req.body;
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return handleResponse(404, "User not found", {}, resp);
+    }
+    const isMatch = await comparePassword(old_password, user.password);
+    if (!isMatch) {
+      return handleResponse(401, "Invalid old password", {}, resp);
+    }
+
+    const hashedPassword = await hashPassword(new_password);
+    user.password = hashedPassword;
+    await user.save();
+    return handleResponse(200, "Password changed successfully", {}, resp);
+  } catch (err) {
+    return handleResponse(500, err.message, {}, resp);
+  }
+};
+
+// forgot password
+export const forgotPassword = async (req, resp) => {
+  try {
+  } catch (err) {
+    return handleResponse(500, err.message, {}, resp);
+  }
+};
