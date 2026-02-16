@@ -20,12 +20,12 @@ export const authenticateToken = async (req, res, next) => {
       return handleResponse(404, "User not found", {}, res);
     }
 
-    if (
-      user.status != "ACTIVE" &&
-      !["User", "Vendor"].includes(user.role.name)
-    ) {
-      return handleResponse(401, "User is not active", {}, res);
-    }
+    // if (
+    //   user.status != "ACTIVE" &&
+    //   !["User", "Vendor"].includes(user.role.name)
+    // ) {
+    //   return handleResponse(401, "User is not active", {}, res);
+    // }
     req.user = user;
 
     next();
@@ -48,7 +48,7 @@ export const userAuthenticateToken = async (req, res, next) => {
 
     const decoded = verifyToken(token, JWT_SECRET);
 
-    const user = await User.findById(decoded._id);
+    const user = await User.findById(decoded._id).populate("role");
 
     if (!user) {
       return handleResponse(404, "User not found", {}, res);
@@ -86,7 +86,7 @@ export const checkRoleAuth = (allowedRoles = []) => {
         return handleResponse(401, "Unauthorized", {}, res);
       }
 
-      if (!allowedRoles.includes(user.role)) {
+      if (!allowedRoles.includes(user.role.name)) {
         return handleResponse(
           403,
           "You are not allowed to access this resource",
@@ -102,37 +102,35 @@ export const checkRoleAuth = (allowedRoles = []) => {
   };
 };
 
-export const authenticateForgotPasswordToken = async (req, res, next) => {
-  try {
-    const token = req.cookies["forgot-password"];
+export const authenticateForgotPasswordToken = (
+  allowedHeader = "forgot-password",
+) => {
+  return async (req, res, next) => {
+    try {
+      const token = req.cookies[allowedHeader];
 
-    if (!token) {
-      return handleResponse(401, "No token provided", {}, res);
+      if (!token) {
+        return handleResponse(401, "No token provided", {}, res);
+      }
+
+      const decoded = verifyToken(token, JWT_SECRET);
+
+      const user = await User.findById(decoded._id).populate("role");
+
+      if (!user) {
+        return handleResponse(404, "User not found", {}, res);
+      }
+
+      req.user = user;
+
+      next();
+    } catch (error) {
+      if (error.name === "TokenExpiredError") {
+        return handleResponse(401, "Token has expired", {}, res);
+      }
+      return handleResponse(401, "Invalid token", {}, res);
     }
-
-    const decoded = verifyToken(token, JWT_SECRET);
-
-    const user = await User.findById(decoded._id).populate("role");
-
-    if (!user) {
-      return handleResponse(404, "User not found", {}, res);
-    }
-
-    if (
-      user.status != "ACTIVE" &&
-      !["User", "Vendor"].includes(user.role.name)
-    ) {
-      return handleResponse(401, "User is not active", {}, res);
-    }
-    req.user = user;
-
-    next();
-  } catch (error) {
-    if (error.name === "TokenExpiredError") {
-      return handleResponse(401, "Token has expired", {}, res);
-    }
-    return handleResponse(401, "Invalid token", {}, res);
-  }
+  };
 };
 
 export const optionalAuthenticateToken = async (req, res, next) => {
