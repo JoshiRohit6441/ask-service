@@ -6,3 +6,6 @@ export const userProfileUpload=userProfile.fields([{name:"profile_pic",maxCount:
 
 const serviceCategory=fileUpload("public/service-category")
 export const serviceCategoryUpload=serviceCategory.fields([{name:"image",maxCount:1}]);
+
+const serviceDocument=fileUpload("public/document")
+export const serviceDocumentUpload=serviceDocument.any();

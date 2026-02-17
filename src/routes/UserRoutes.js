@@ -30,6 +30,8 @@ import {
   verifyOTP,
   verifyPhone,
   verifyPhoneAndLogin,
+    saveNotificationPreferences ,
+  getNotificationPreferences ,
 } from "../controller/user/AuthController.js";
 import { userProfileUpload } from "../../utils/multer.js";
 
@@ -65,7 +67,10 @@ router.post(
   closeServiceRequest,
 );
 
+
 // ==============================AUTH=================================
+
+
 // signup
 router.post("/signup", signup);
 
@@ -115,6 +120,9 @@ router.get(
   getProfile,
 );
 
+router.get("/notification", userAuthenticateToken , checkRoleAuth(["User"]) , getNotificationPreferences);
+router.put("/notification", userAuthenticateToken , checkRoleAuth(["User"]) , saveNotificationPreferences);
+
 // forgot password
 router.post("/forgot-password", forgotPassword);
 
@@ -127,8 +135,8 @@ router.post("/verify-forgot-password-otp", verifyOTP);
 // reset password
 router.post("/reset-password", authenticateForgotPasswordToken("forgot-password"), resetPassword);
 
-router.get("/test", (req, res) => {
-  return handleResponse(200, "User route is working fine", {}, res);
-});
+router.get("/test", (req, res) => { return handleResponse(200, "User route is working fine", {}, res); }) ;
+
+
 
 export default router;

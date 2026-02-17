@@ -56,6 +56,12 @@ const ServiceCategorySchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+
+    credit:{
+       type : Number ,
+       default : 3
+    },
+
     deletedAt: {
       type: Date,
       default: null,

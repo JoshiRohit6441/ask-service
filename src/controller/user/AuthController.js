@@ -13,6 +13,7 @@ import crypto from "crypto";
 import { sendEmail } from "../../../config/emailConfig.js";
 import { cookieOptions } from "../../../utils/helperFunction.js";
 import VendorCreditWallet from "../../models/VendorCreditWalletModel.js";
+import UserNotification from "../../models/userNotificationModel.js";
 
 // SIGNUP
 export const signup = async (req, resp) => {
@@ -589,12 +590,18 @@ export const verifyOTP = async (req, resp) => {
     await user.save();
 
     const token = generateOneMinToken(user.toObject());
+    
     await resp.cookie("forgot-password", token, cookieOptions);
+
     return handleResponse(200, "OTP verified successfully", { token }, resp);
+
   } catch (err) {
+
     return handleResponse(500, err.message, {}, resp);
+
   }
 };
+
 
 // resend phone email OTP
 export const resendPhoneEmailOTP = async (req, resp) => {
@@ -628,5 +635,52 @@ export const resetPassword = async (req, resp) => {
     return handleResponse(200, "Password reset successfully", {}, resp);
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
+  }
+};
+
+
+
+export const saveNotificationPreferences = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const preferences = await UserNotification.findOneAndUpdate(
+      { user_id: userId },
+      { ...req.body },
+      { new: true, upsert: true },
+    );
+    return handleResponse(
+      200,
+      "Notification preferences saved successfully",
+      preferences,
+      res,
+    );
+  } catch (error) {
+    return handleResponse(500, error.message, {}, res);
+  }
+};
+
+export const getNotificationPreferences = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    let preferences = await UserNotification.findOne({
+      user_id: userId,
+    }).lean();
+
+
+    if (!preferences) {
+      preferences = await UserNotification.create({
+        user_id: userId,
+      });
+    }
+
+    return handleResponse(
+      200,
+      "Notification preferences fetched successfully",
+      preferences,
+      res,
+    );
+  } catch (error) {
+    return handleResponse(500, error.message, {}, res);
   }
 };

@@ -7,11 +7,13 @@ const VendorDocumentSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+
     document_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "ServiceDocumentRequirement",
       required: true,
     },
+
     file: {
       type: String,
       required: true,
@@ -19,10 +21,17 @@ const VendorDocumentSchema = new mongoose.Schema(
     name: {
       type: String,
     },
+    
     required: {
       type: Boolean,
       default: false,
     },
+
+    status : {
+        type  : String ,
+        enum : ["Pending","Verified","Rejected"] ,
+        default : "Pending"
+    }
   },
   {
     timestamps: true,

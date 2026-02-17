@@ -83,10 +83,12 @@ export const updateServiceCategory = async (req, resp) => {
         return handleResponse(400, "Category cannot be parent of itself", {}, resp);
       }
 
+
       const parentCategory = await ServiceCategory.findOne({
         _id: parent_category,
         deletedAt: null,
       });
+      
 
       if (!parentCategory) {
         return handleResponse(404, "Parent category not found", {}, resp);

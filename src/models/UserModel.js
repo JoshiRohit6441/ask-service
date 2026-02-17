@@ -90,6 +90,10 @@ const UserSchema = mongoose.Schema(
       ref: "ServiceCategory",
       set: sanitizeObjectId,
     },
+    password_updateAt : {
+         type: Date ,
+    }
+
   },
   {
     timestamps: {},

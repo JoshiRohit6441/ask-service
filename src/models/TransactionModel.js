@@ -22,6 +22,9 @@ const TransactionModel = mongoose.Schema(
       type: String,
       enum: ["stripe", "paypal", "razorpay", "manual"],
     },
+    payment_method : {
+      type :String 
+    },
     status: {
       type: String,
       enum: ["pending", "completed", "failed"],

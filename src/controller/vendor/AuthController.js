@@ -20,6 +20,12 @@ import {
   cookieOptions,
   documentUploadCookieOptions,
 } from "../../../utils/helperFunction.js";
+import VendorDocument from "../../models/VendorDocumentModel.js";
+import BusinessInformation from "../../models/BusinessInformationModel.js";
+import VendorNotification from "../../models/vendorNotificationModel.js";
+import VendorReview from "../../models/VendorReviewModel.js";
+import Transaction from "../../models/TransactionModel.js";
+
 
 // register vendor
 export const registerVendor = async (req, resp) => {
@@ -27,6 +33,8 @@ export const registerVendor = async (req, resp) => {
     const { first_name, last_name, email, phone, password } = req.body;
 
     const existingEmail = await User.findOne({ email });
+
+    console.log(existingEmail);
 
     if (existingEmail)
       return handleResponse(
@@ -74,12 +82,7 @@ export const registerVendor = async (req, resp) => {
 
     if (!user) return handleResponse(400, "Failed to create user", {}, resp);
 
-    return handleResponse(
-      201,
-      "Vendor registered successfully",
-      { user },
-      resp,
-    );
+    return handleResponse(201, "Vendor registered successfully", {}, resp);
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
   }
@@ -109,20 +112,15 @@ export const resendOTP = async (req, resp) => {
 
     if (identifierType === "EMAIL") {
       user.otp = generateOTP();
-      user.otp_expires_at = moment().add(1, "minutes").toDate();
+      user.otp_expires_at = moment().add(2, "minutes").toDate();
     } else {
       user.otp_phone = generateOTP();
-      user.otp_phone_expiry_at = moment().add(1, "minutes").toDate();
+      user.otp_phone_expiry_at = moment().add(2, "minutes").toDate();
     }
 
     user.otp_for = type;
     await user.save();
-    return handleResponse(
-      200,
-      "OTP sent successfully",
-      { otp: user.otp },
-      resp,
-    );
+    return handleResponse(200, "OTP sent successfully", {}, resp);
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
   }
@@ -132,8 +130,11 @@ export const resendOTP = async (req, resp) => {
 export const verifyRegistrationOTP = async (req, resp) => {
   try {
     const { email, phone, otp_phone, otp_email, type } = req.body;
+    console.log(email);
 
-    const user = await User.findOne({ email, phone });
+    const user = await User.findOne({
+      $or: [{ email: email }, { phone: phone }],
+    });
 
     if (!user) {
       return handleResponse(404, "User not found", {}, resp);
@@ -145,7 +146,7 @@ export const verifyRegistrationOTP = async (req, resp) => {
     let emailVerified = user.is_email_verified;
     let phoneVerified = user.is_phone_verified;
 
-    if (!emailVerified) {
+    if (otp_email) {
       if (user.otp != otp_email) {
         return handleResponse(401, "Invalid Email OTP", {}, resp);
       }
@@ -160,7 +161,7 @@ export const verifyRegistrationOTP = async (req, resp) => {
       emailVerified = true;
     }
 
-    if (!phoneVerified) {
+    if (otp_phone) {
       if (user.otp_phone != otp_phone) {
         return handleResponse(401, "Invalid Phone OTP", {}, resp);
       }
@@ -204,7 +205,7 @@ export const verifyRegistrationOTP = async (req, resp) => {
 export const loginVendor = async (req, resp) => {
   try {
     const { identifier, password, identifierType, type } = req.body;
-    if (!identifier || !identifierType || !type) {
+    if (!identifier || !type) {
       return handleResponse(
         400,
         "Identifier, password, identifier type and type are required",
@@ -227,7 +228,7 @@ export const loginVendor = async (req, resp) => {
     if (type == "OTP") {
       if (emailVerified && phoneVerified && user.status == "ACTIVE") {
         user.otp = generateOTP();
-        user.otp_expires_at = moment().add(1, "minutes").toDate();
+        user.otp_expires_at = moment().add(2, "minutes").toDate();
         user.otp_for = "LOGIN";
         await user.save();
 
@@ -435,14 +436,32 @@ export const changePassword = async (req, resp) => {
       return handleResponse(404, "User not found", {}, resp);
     }
     const isMatch = await comparePassword(old_password, user.password);
+
     if (!isMatch) {
       return handleResponse(401, "Invalid old password", {}, resp);
     }
 
     const hashedPassword = await hashPassword(new_password);
     user.password = hashedPassword;
+    user.password_updateAt = new Date();
     await user.save();
+
     return handleResponse(200, "Password changed successfully", {}, resp);
+  } catch (err) {
+    return handleResponse(500, err.message, {}, resp);
+  }
+};
+
+export const deleteAccount = async (req, resp) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return handleResponse(404, "User not found", {}, resp);
+    }
+
+    User.findByIdAndDelete(user._id);
+
+    return handleResponse(200, "Account deleted successfully", {}, resp);
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
   }
@@ -451,7 +470,9 @@ export const changePassword = async (req, resp) => {
 // get profile
 export const getProfile = async (req, resp) => {
   try {
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id).select(
+      "-password -otp -otp_phone",
+    );
     if (!user) return handleResponse(404, "User not found", {}, resp);
     return handleResponse(200, "Profile fetched successfully", user, resp);
   } catch (err) {
@@ -546,7 +567,9 @@ export const resetPassword = async (req, resp) => {
     const user = await User.findById(req.user._id);
     if (!user) return handleResponse(404, "User not found", {}, resp);
     user.password = await hashPassword(password);
+
     await user.save();
+
     return handleResponse(200, "Password reset successfully", {}, resp);
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
@@ -571,7 +594,7 @@ export const getAllServices = async (req, resp) => {
 export const updateUserServiceData = async (req, resp) => {
   try {
     const { service } = req.body;
-    const user = await User.findById(id);
+    const user = await User.findById(req?.user?._id);
     if (!user) {
       return handleResponse(404, "User not found", {}, resp);
     }
@@ -623,7 +646,7 @@ export const updateDocumentRequiredForService = async (req, resp) => {
         (key) => key === item?._id?.toString(),
       );
       return {
-        user_id: req.user._id,
+        user_id: req.user?._id,
         document_id: item?._id,
         file: document?.path || null,
         name: item?.name || null,
@@ -639,3 +662,374 @@ export const updateDocumentRequiredForService = async (req, resp) => {
     return handleResponse(500, err.message, {}, resp);
   }
 };
+
+export const availableLeads = async (req, resp) => {
+  try {
+    const { city, state, country, sort } = req.query;
+
+    let filter = {
+      service_category: req?.user?.service,
+      deletedAt: null,
+      status: "ACTIVE",
+    };
+
+    if (city) filter.city = city;
+    if (state) filter.state = state;
+    if (country) filter.country = country;
+
+    let sortOption = {};
+
+    // Default sort
+    sortOption.createdAt = -1;
+
+    const leads = await ServiceRequest.find(filter)
+      .populate({
+        path: "service_category",
+        select: "title credit",
+      })
+      .lean();
+
+    if (sort === "high_to_low") {
+      leads.sort(
+        (a, b) =>
+          (b.service_category?.credit || 0) - (a.service_category?.credit || 0),
+      );
+    }
+
+    if (sort === "low_to_high") {
+      leads.sort(
+        (a, b) =>
+          (a.service_category?.credit || 0) - (b.service_category?.credit || 0),
+      );
+    }
+
+    return handleResponse(200, "leads", leads, resp);
+  } catch (err) {
+    return handleResponse(500, err.message, {}, resp);
+  }
+};
+
+export const singleService = async (req, resp) => {
+  try {
+    const leads = await ServiceRequest.findById(req.params.id)
+      .populate({
+        path: "service_category",
+        select: "title credit",
+      })
+      .lean();
+
+    if (!leads) {
+      return handleResponse(404, "service not found", {}, resp);
+    }
+
+    return handleResponse(200, "service", leads, resp);
+  } catch (err) {
+    return handleResponse(500, err.message, {}, resp);
+  }
+};
+
+export const createUpdateBusinessInfo = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const {
+      business_name,
+      owner_name,
+      service_category,
+      email,
+      phone,
+      business_address,
+      postcode,
+      city,
+      vat_number,
+      company_registration_number,
+      years_of_activity,
+      company_size,
+      about_company,
+    } = req.body;
+
+    if (!business_name || !business_address || !postcode || !city) {
+      return handleResponse(400, "Required fields are missing", {}, res);
+    }
+
+    const business = await BusinessInformation.findOneAndUpdate(
+      { user_id: userId },
+      {
+        business_name,
+        owner_name,
+        service_category,
+        email,
+        phone,
+        business_address,
+        postcode,
+        city,
+        vat_number,
+        company_registration_number,
+        years_of_activity,
+        company_size,
+        about_company,
+      },
+      { new: true, upsert: true },
+    );
+
+    return handleResponse(
+      200,
+      "Business information saved successfully",
+      business,
+      res,
+    );
+  } catch (error) {
+    return handleResponse(500, error.message, {}, res);
+  }
+};
+
+export const getBusinessInfo = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const business = await BusinessInformation.findOne({
+      user_id: userId,
+      deletedAt: null,
+    })
+      .populate({
+        path: "user_id",
+        select: "-password -otp",
+        populate: {
+          path: "service",
+          model: "ServiceCategory",
+          select: "title credit description image",
+        },
+      })
+      .lean();
+
+    if (!business) {
+      return handleResponse(404, "Business information not found", {}, res);
+    }
+
+    return handleResponse(
+      200,
+      "Business information fetched successfully",
+      business,
+      res,
+    );
+  } catch (error) {
+    return handleResponse(500, error.message, {}, res);
+  }
+};
+
+export const saveNotificationPreferences = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const preferences = await VendorNotification.findOneAndUpdate(
+      { user_id: userId },
+      { ...req.body },
+      { new: true, upsert: true },
+    );
+
+    return handleResponse(
+      200,
+      "Notification preferences saved successfully",
+      preferences,
+      res,
+    );
+  } catch (error) {
+    return handleResponse(500, error.message, {}, res);
+  }
+};
+
+export const getNotificationPreferences = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    let preferences = await VendorNotification.findOne({
+      user_id: userId,
+    }).lean();
+
+    // If not exists → create default
+    if (!preferences) {
+      preferences = await VendorNotification.create({
+        user_id: userId,
+      });
+    }
+
+    return handleResponse(
+      200,
+      "Notification preferences fetched successfully",
+      preferences,
+      res,
+    );
+  } catch (error) {
+    return handleResponse(500, error.message, {}, res);
+  }
+};
+
+
+export const VerificationDocument = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    let preferences = await VendorDocument.find({
+      user_id: userId,
+    }).lean();
+
+
+    return handleResponse(
+      200,
+      "Document fetched successfully",
+      preferences,
+      res,
+    );
+  } catch (error) {
+    return handleResponse(500, error.message, {}, res);
+  }
+};
+
+
+
+export const allReviews = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+   
+  // Get all reviews
+    const reviews = await VendorReview.find({
+      vendor: userId,
+    })
+      .populate("user", "first_name last_name profile_pic email")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const totalReviews = reviews.length;
+
+    // Calculate average rating
+    const averageRating =
+      totalReviews > 0
+        ? (
+            reviews.reduce((sum, r) => sum + (r.rating || 0), 0) /
+            totalReviews
+          ).toFixed(1)
+        : 0;
+
+    // Rating distribution
+    const ratingDistribution = {
+      5: 0,
+      4: 0,
+      3: 0,
+      2: 0,
+      1: 0,
+    };
+
+    reviews.forEach((review) => {
+      if (review.rating >= 1 && review.rating <= 5) {
+        ratingDistribution[review.rating]++;
+      }
+    });
+
+    return handleResponse(
+      200,
+      "Reviews fetched successfully",
+      {
+        averageRating: Number(averageRating),
+        totalReviews,
+        ratingDistribution,
+        reviews,
+      },
+      res
+    );
+
+  } catch (error) {
+    return handleResponse(500, error.message, {}, res);
+  }
+};
+
+
+
+export const getTransactions = async (req, res) => {
+  try {
+
+    const userId = req.user._id;
+    const {
+      from_date,
+      to_date,
+      status,
+      period, // last_30_days | last_3_months | last_6_months
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+
+    const filter = {
+      user_id: userId,
+    };
+
+    // ✅ Status filter
+    if (status) {
+      filter.status = status;
+    }
+
+    // ✅ Date Filters
+    let startDate, endDate;
+
+    if (period) {
+      const now = new Date();
+
+      if (period === "last_30_days") {
+        startDate = new Date();
+        startDate.setDate(now.getDate() - 30);
+      }
+
+      if (period === "last_3_months") {
+        startDate = new Date();
+        startDate.setMonth(now.getMonth() - 3);
+      }
+
+      if (period === "last_6_months") {
+        startDate = new Date();
+        startDate.setMonth(now.getMonth() - 6);
+      }
+
+      endDate = now;
+    }
+
+    if (from_date && to_date) {
+      startDate = new Date(from_date);
+      endDate = new Date(to_date);
+    }
+
+    if (startDate && endDate) {
+      filter.createdAt = {
+        $gte: startDate,
+        $lte: endDate,
+      };
+    }
+
+    // Pagination
+    const skip = (page - 1) * limit;
+
+    const transactions = await Transaction.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(Number(limit))
+      .lean();
+
+    const total = await Transaction.countDocuments(filter);
+
+    return handleResponse(
+      200,
+      "Transactions fetched successfully",
+      {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        transactions,
+      },
+      res
+    );
+  } catch (error) {
+    return handleResponse(500, error.message, {}, res);
+  }
+};
+
+
+

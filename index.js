@@ -13,6 +13,7 @@ import logger from "./utils/logger.js";
 import cookieParser from "cookie-parser";
 import AdminRoutes from "./src/routes/AdminRoutes.js";
 import UserRoutes from "./src/routes/UserRoutes.js";
+import VendorRoutes from "./src/routes/vendorRoutes.js";
 import "./cron/serviceRequestExpiryCron.js"
 
 const app = express();
@@ -91,6 +92,7 @@ app.use("", express.static(path.join(__dirname, "")));
 
 app.use("/api/admin", AdminRoutes);
 app.use("/api/user", UserRoutes);
+app.use("/api/vendor", VendorRoutes);
 app.get("/download", async (req, res) => {
   const fileUrl = req.query.url;
 

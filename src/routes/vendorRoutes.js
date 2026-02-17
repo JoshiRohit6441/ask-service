@@ -1,5 +1,5 @@
 import express from "express";
-import handleResponse from "../../utils/http-response";
+import handleResponse from "../../utils/http-response.js";
 import {
   changePassword,
   forgotPassword,
@@ -9,15 +9,25 @@ import {
   loginVendor,
   registerVendor,
   resendOTP,
-  resendPhoneEmailOTP,
+  resendPhoneEmailOTP ,
   resetPassword,
-  updateDocumentRequiredForService,
-  updateUserServiceData,
-  updateVendorProfile,
-  verifyOTP,
-  verifyRegistrationOTP,
+  updateDocumentRequiredForService ,
+  updateUserServiceData ,
+  updateVendorProfile ,
+  verifyOTP ,
+  verifyRegistrationOTP ,
+  availableLeads ,
+  singleService ,
+  getBusinessInfo ,
+  createUpdateBusinessInfo ,
+  deleteAccount ,
+  saveNotificationPreferences ,
+  getNotificationPreferences ,
+  VerificationDocument ,
+  allReviews ,
+  getTransactions
 } from "../controller/vendor/AuthController.js";
-import { userProfileUpload } from "../../utils/multer";
+import { serviceDocumentUpload, userProfileUpload } from "../../utils/multer.js";
 import {
   authenticateForgotPasswordToken,
   checkRoleAuth,
@@ -50,7 +60,7 @@ router.put(
 router.get(
   "/get-profile",
   userAuthenticateToken,
-  checkRoleAuth(["User"]),
+  checkRoleAuth(["Vendor"]),
   getProfile,
 );
 
@@ -58,9 +68,18 @@ router.get(
 router.put(
   "/change-password",
   userAuthenticateToken,
-  checkRoleAuth(["User"]),
+  checkRoleAuth(["Vendor"]),
   changePassword,
 );
+
+
+router.put(
+  "/delete-account",
+  userAuthenticateToken,
+  checkRoleAuth(["Vendor"]),
+  deleteAccount,
+);
+
 
 // forgot password
 router.post("/forgot-password", forgotPassword);
@@ -81,14 +100,32 @@ router.get("/get-all-services",   getAllServices);
 router.get("/get-all-services-document-required", userAuthenticateToken, checkRoleAuth(["Vendor"]), getDocumentRequiredForService);
 
 // update user's service data
-router.put("/update-service-data", authenticateForgotPasswordToken("service-selection-document-upload"), checkRoleAuth(["Vendor"]), updateUserServiceData);
+router.put("/update-service-data", userAuthenticateToken , checkRoleAuth(["Vendor"]) , updateUserServiceData);
 
 // upload service selection document
-router.get("/upload-service-selection-document", authenticateForgotPasswordToken("service-selection-document-upload"), updateDocumentRequiredForService);
+router.get("/upload-service-selection-document",userAuthenticateToken ,serviceDocumentUpload, updateDocumentRequiredForService);
+
+router.get("/available-leads", userAuthenticateToken , checkRoleAuth(["Vendor"]) , availableLeads);
+router.get("/service/:id", userAuthenticateToken , checkRoleAuth(["Vendor"]) , singleService);
+
+
+router.get("/business-information", userAuthenticateToken , checkRoleAuth(["Vendor"]) , getBusinessInfo);
+router.put("/business-information", userAuthenticateToken , checkRoleAuth(["Vendor"]) , createUpdateBusinessInfo);
+
+router.get("/notification", userAuthenticateToken , checkRoleAuth(["Vendor"]) , getNotificationPreferences);
+router.put("/notification", userAuthenticateToken , checkRoleAuth(["Vendor"]) , saveNotificationPreferences);
+router.get("/verification-documents", userAuthenticateToken , checkRoleAuth(["Vendor"]) , VerificationDocument);
+
+router.get("/all-review", userAuthenticateToken , checkRoleAuth(["Vendor"]) , allReviews);
+router.get("/all-transaction", userAuthenticateToken , checkRoleAuth(["Vendor"]) , getTransactions);
 
 
 
-router.get("/vendor-test", (req, resp) => {
+
+
+
+
+router.get("/", (req, resp) => {
   return handleResponse(200, "Vendor test successful", {}, resp);
 });
 
