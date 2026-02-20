@@ -25,7 +25,9 @@ import BusinessInformation from "../../models/BusinessInformationModel.js";
 import VendorNotification from "../../models/vendorNotificationModel.js";
 import VendorReview from "../../models/VendorReviewModel.js";
 import Transaction from "../../models/TransactionModel.js";
-
+import VendorLeadUnlock from "../../models/VendorLeadUnlockModel.js";
+import VendorQuote from "../../models/VendorQuoteModel.js";
+import { sendEmail } from "../../../config/emailConfig.js";
 
 // register vendor
 export const registerVendor = async (req, resp) => {
@@ -80,6 +82,22 @@ export const registerVendor = async (req, resp) => {
       amount: 0,
     });
 
+
+      try {
+
+        await sendEmail({
+               to: user.email,
+               subject: "Verify your email",
+               html: `<p>Your OTP :${user.otp } </p>`,
+             });
+      }
+      catch(e){
+         console.log(e);
+         
+      }
+
+
+
     if (!user) return handleResponse(400, "Failed to create user", {}, resp);
 
     return handleResponse(201, "Vendor registered successfully", {}, resp);
@@ -113,6 +131,24 @@ export const resendOTP = async (req, resp) => {
     if (identifierType === "EMAIL") {
       user.otp = generateOTP();
       user.otp_expires_at = moment().add(2, "minutes").toDate();
+
+      console.log("us");
+      
+      try {
+
+        await sendEmail({
+               to: user.email,
+               subject: "Verify your email",
+               html: `<p>Your OTP :${user.otp } </p>`,
+             });
+      }
+      catch(e){
+         console.log(e);
+         
+      }
+
+
+
     } else {
       user.otp_phone = generateOTP();
       user.otp_phone_expiry_at = moment().add(2, "minutes").toDate();
@@ -629,42 +665,103 @@ export const getDocumentRequiredForService = async (req, resp) => {
   }
 };
 
-// upload document required for service
+// upload document required for service (per document type by document_id)
 export const updateDocumentRequiredForService = async (req, resp) => {
   try {
-    const files = extractFiles(req.files);
-    const user = await User.findById(req.user._id);
-    if (!user) {
-      return handleResponse(404, "User not found", {}, resp);
+    const userId = req.user._id;
+    const user = await User.findById(userId).select("service");
+    if (!user) return handleResponse(404, "User not found", {}, resp);
+    if (!user.service) {
+      return handleResponse(400, "Please select a service first", {}, resp);
     }
-    const documentRequired = await ServiceDocumentRequirement.findById(
-      user.service,
+
+    const requirements = await ServiceDocumentRequirement.find({
+      service_category: user.service,
+      status: "ACTIVE",
+      deletedAt: null,
+    }).lean();
+
+    const requirementIds = new Set(requirements.map((r) => r._id.toString()));
+    const requirementMap = new Map(
+      requirements.map((r) => [r._id.toString(), r]),
     );
 
-    const vendorUploadedDocument = documentRequired?.map((item) => {
-      const document = Object.keys(files).find(
-        (key) => key === item?._id?.toString(),
+    const files = Array.isArray(req.files)
+      ? req.files
+      : Object.values(req.files || {}).flat();
+    if (!files.length) {
+      return handleResponse(
+        400,
+        "No files uploaded. Send files with fieldname = document_id (ServiceDocumentRequirement _id).",
+        {},
+        resp,
       );
-      return {
-        user_id: req.user?._id,
-        document_id: item?._id,
-        file: document?.path || null,
-        name: item?.name || null,
-        required: item?.is_required || false,
-        type: item?.type || null,
+    }
+
+    const normalizedPath = (p) => (p ? p.replace(/\\/g, "/") : null);
+    const updated = [];
+
+    console.log(files);
+
+    for (const file of files) {
+      const documentId = file.fieldname || file.document_id;
+      const path = file.path ?? null;
+      const originalname = file.originalname || null;
+
+      if (!documentId || !path) continue;
+      if (!requirementIds.has(documentId.toString())) {
+        continue;
+      }
+
+      const requirement = requirementMap.get(documentId.toString());
+      const docPayload = {
+        user_id: userId,
+        document_id: requirement._id,
+        file: path,
+        file_name: originalname || requirement.name,
+        name: requirement.name,
+        required: requirement.is_required || false,
+        status: "Pending",
       };
-    });
 
-    await VendorDocument.insertMany(vendorUploadedDocument);
+      const vendorDoc = await VendorDocument.findOneAndUpdate(
+        { user_id: userId, document_id: requirement._id },
+        { $set: docPayload },
+        { new: true, upsert: true },
+      );
+      updated.push({
+        document_id: vendorDoc.document_id,
+        name: vendorDoc.name,
+        status: vendorDoc.status,
+        file_name: vendorDoc.file_name,
+      });
+    }
 
-    return handleResponse(200, "Documents updated successfully", {}, resp);
+    return handleResponse(
+      200,
+      "Documents updated successfully",
+      { uploaded: updated },
+      resp,
+    );
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
   }
 };
 
+function maskContactDetails(contact) {
+  if (!contact) return contact;
+  return {
+    ...contact,
+    first_name: contact.first_name ? contact.first_name[0] + "***" : "***",
+    last_name: contact.last_name ? contact.last_name[0] + "***" : "***",
+    phone: (contact.phone || "").slice(0, 3) + " *******",
+    email: (contact.email || "").replace(/(.{2})(.*)(@.*)/, "$1*******$3"),
+  };
+}
+
 export const availableLeads = async (req, resp) => {
   try {
+    const vendorId = req?.user?._id;
     const { city, state, country, sort } = req.query;
 
     let filter = {
@@ -703,7 +800,51 @@ export const availableLeads = async (req, resp) => {
       );
     }
 
-    return handleResponse(200, "leads", leads, resp);
+
+
+
+    const leadObjectIds = leads.map((l) => l._id);
+    const unlockedIds = new Set(
+      vendorId
+        ? (
+            await VendorLeadUnlock.find({
+              vendor_id: vendorId,
+              service_request_id: { $in: leadObjectIds },
+            }).distinct("service_request_id")
+          )?.map((id) => id.toString()) || []
+        : [],
+    );
+
+  const leadsWithMasking = await Promise.all(
+  leads.map(async (lead) => {
+    const unlocked = unlockedIds.has(lead._id.toString());
+    const creditsToUnlock = lead.service_category?.credit ?? 3;
+
+    const quotesCount = await VendorQuote.countDocuments({
+      service_request_id: lead._id,
+      status: "SENT",
+    });
+
+    if (unlocked) {
+      return {
+        ...lead,
+        unlocked: true,
+        creditsToUnlock,
+        quotes_count: quotesCount,
+      };
+    }
+
+    return {
+      ...lead,
+      contact_details: maskContactDetails(lead.contact_details),
+      unlocked: false,
+      creditsToUnlock,
+      quotes_count: quotesCount,
+    };
+  })
+);
+
+    return handleResponse(200, "leads", leadsWithMasking, resp);
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
   }
@@ -746,6 +887,7 @@ export const createUpdateBusinessInfo = async (req, res) => {
       years_of_activity,
       company_size,
       about_company,
+      website_link 
     } = req.body;
 
     if (!business_name || !business_address || !postcode || !city) {
@@ -768,6 +910,7 @@ export const createUpdateBusinessInfo = async (req, res) => {
         years_of_activity,
         company_size,
         about_company,
+        website_link
       },
       { new: true, upsert: true },
     );
@@ -864,20 +1007,57 @@ export const getNotificationPreferences = async (req, res) => {
   }
 };
 
-
 export const VerificationDocument = async (req, res) => {
   try {
     const userId = req.user._id;
+    const user = await User.findById(userId).select("service").lean();
+    if (!user) return handleResponse(404, "User not found", {}, res);
 
-    let preferences = await VendorDocument.find({
-      user_id: userId,
-    }).lean();
+    const requirements = await ServiceDocumentRequirement.find({
+      service_category: user.service || null,
+      status: "ACTIVE",
+      deletedAt: null,
+    })
+      .sort({ createdAt: 1 })
+      .lean();
 
+    const vendorDocs = await VendorDocument.find({ user_id: userId }).lean();
+    const docByRequirement = new Map(
+      vendorDocs.map((d) => [d.document_id.toString(), d]),
+    );
+
+    const baseUrl = process.env.IMAGE_URL || "";
+    const documents = requirements.map((reqItem) => {
+      const uploaded = docByRequirement.get(reqItem._id.toString());
+      const status = uploaded ? uploaded.status : "Not uploaded";
+      return {
+        document_id: reqItem._id,
+        name: reqItem.name,
+        description: reqItem.description || null,
+        allowed_formats: reqItem.allowed_formats || "PDF, JPG, PNG (Max 5MB)",
+        type: reqItem.type,
+        is_required: reqItem.is_required,
+        status,
+        file: uploaded
+          ? {
+              path: uploaded.file,
+              file_name: uploaded.file_name || uploaded.name,
+              url: uploaded.file
+                ? baseUrl +
+                  (uploaded.file.startsWith("/")
+                    ? uploaded.file
+                    : uploaded.file)
+                : null,
+            }
+          : null,
+        uploadedAt: uploaded?.updatedAt || null,
+      };
+    });
 
     return handleResponse(
       200,
-      "Document fetched successfully",
-      preferences,
+      "Documents fetched successfully",
+      { documents },
       res,
     );
   } catch (error) {
@@ -885,14 +1065,11 @@ export const VerificationDocument = async (req, res) => {
   }
 };
 
-
-
 export const allReviews = async (req, res) => {
   try {
     const userId = req.user._id;
 
-   
-  // Get all reviews
+    // Get all reviews
     const reviews = await VendorReview.find({
       vendor: userId,
     })
@@ -906,8 +1083,7 @@ export const allReviews = async (req, res) => {
     const averageRating =
       totalReviews > 0
         ? (
-            reviews.reduce((sum, r) => sum + (r.rating || 0), 0) /
-            totalReviews
+            reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / totalReviews
           ).toFixed(1)
         : 0;
 
@@ -935,19 +1111,47 @@ export const allReviews = async (req, res) => {
         ratingDistribution,
         reviews,
       },
-      res
+      res,
     );
-
   } catch (error) {
     return handleResponse(500, error.message, {}, res);
   }
 };
 
+// Format date as "DD Mon YYYY, HH:MM" for Payment History
+function formatTransactionDateTime(date) {
+  if (!date) return null;
+  const d = new Date(date);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = months[d.getMonth()];
+  const year = d.getFullYear();
+  const hours = String(d.getHours()).padStart(2, "0");
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  return `${day} ${month} ${year}, ${hours}:${minutes}`;
+}
 
+// Mask payment method e.g. "Visa 4532" -> "Visa **** 4532"
+function maskPaymentMethod(method) {
+  if (!method || typeof method !== "string") return null;
+  const trimmed = method.trim();
+  if (trimmed.length <= 4) return "**** " + trimmed;
+  const last4 = trimmed.slice(-4);
+  const brand = trimmed.slice(0, -4).replace(/\d/g, "").trim() || "Card";
+  return `${brand} **** ${last4}`;
+}
+
+// Generate transaction ID for display (TXN-YYYY-NNNNN)
+function toTransactionId(transaction_number, _id, createdAt) {
+  if (transaction_number) return transaction_number;
+  if (!_id || !createdAt) return null;
+  const year = new Date(createdAt).getFullYear();
+  const num = parseInt(_id.toString().slice(-5), 16) % 100000;
+  return `TXN-${year}-${String(num).padStart(5, "0")}`;
+}
 
 export const getTransactions = async (req, res) => {
   try {
-
     const userId = req.user._id;
     const {
       from_date,
@@ -958,78 +1162,71 @@ export const getTransactions = async (req, res) => {
       limit = 10,
     } = req.query;
 
+    const filter = { user_id: userId };
 
-    const filter = {
-      user_id: userId,
-    };
-
-    // ✅ Status filter
-    if (status) {
-      filter.status = status;
+    // Status filter: all | completed | failed | refunded
+    if (status && status.toLowerCase() !== "all") {
+      filter.status = status.toLowerCase();
     }
 
-    // ✅ Date Filters
     let startDate, endDate;
-
     if (period) {
       const now = new Date();
-
-      if (period === "last_30_days") {
-        startDate = new Date();
+      endDate = new Date(now);
+      startDate = new Date(now);
+      const p = (typeof period === "string" ? period : "").toLowerCase();
+      if (p === "last_30_days" || p === "last 30 days") {
         startDate.setDate(now.getDate() - 30);
-      }
-
-      if (period === "last_3_months") {
-        startDate = new Date();
+      } else if (p === "last_3_months" || p === "last 3 months") {
         startDate.setMonth(now.getMonth() - 3);
-      }
-
-      if (period === "last_6_months") {
-        startDate = new Date();
+      } else if (p === "last_6_months" || p === "last 6 months") {
         startDate.setMonth(now.getMonth() - 6);
       }
-
-      endDate = now;
     }
-
     if (from_date && to_date) {
       startDate = new Date(from_date);
       endDate = new Date(to_date);
     }
-
     if (startDate && endDate) {
-      filter.createdAt = {
-        $gte: startDate,
-        $lte: endDate,
-      };
+      filter.createdAt = { $gte: startDate, $lte: endDate };
     }
 
-    // Pagination
-    const skip = (page - 1) * limit;
+    const pageNum = Math.max(1, parseInt(page, 10));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10)));
+    const skip = (pageNum - 1) * limitNum;
 
-    const transactions = await Transaction.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit))
-      .lean();
+    const [transactions, total] = await Promise.all([
+      Transaction.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limitNum).lean(),
+      Transaction.countDocuments(filter),
+    ]);
 
-    const total = await Transaction.countDocuments(filter);
+    const baseUrl = process.env.BASE_URL || "";
+    const list = transactions.map((t) => ({
+      _id: t._id,
+      transaction_id: toTransactionId(t.transaction_number, t._id, t.createdAt),
+      date_time: formatTransactionDateTime(t.createdAt),
+      payment_method: maskPaymentMethod(t.payment_method) || (t.plat_form === "manual" ? null : t.plat_form),
+      amount_paid: t.amount_paid != null ? t.amount_paid : null,
+      currency: t.currency || "EUR",
+      credit_added: t.type === "credit" && t.amount != null ? `+${t.amount} credits` : null,
+      status: t.status ? t.status.charAt(0).toUpperCase() + t.status.slice(1) : "Pending",
+      receipt_url: baseUrl ? `${baseUrl}/api/vendor/transactions/${t._id}/receipt` : null,
+      description: t.description,
+    }));
 
     return handleResponse(
       200,
       "Transactions fetched successfully",
       {
         total,
-        page: Number(page),
-        limit: Number(limit),
-        transactions,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+        transactions: list,
       },
-      res
+      res,
     );
   } catch (error) {
     return handleResponse(500, error.message, {}, res);
   }
 };
-
-
-

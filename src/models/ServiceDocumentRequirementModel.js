@@ -12,6 +12,16 @@ const ServiceDocumentRequirementSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    description: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    allowed_formats: {
+      type: String,
+      default: "PDF, JPG, PNG (Max 5MB)",
+      trim: true,
+    },
     type: {
       type: String,
       enum: ["DOCUMENT", "LICENSE"],

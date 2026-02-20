@@ -15,6 +15,10 @@ import AdminRoutes from "./src/routes/AdminRoutes.js";
 import UserRoutes from "./src/routes/UserRoutes.js";
 import VendorRoutes from "./src/routes/vendorRoutes.js";
 import "./cron/serviceRequestExpiryCron.js"
+import {Server} from "socket.io"
+import http from "http";
+import Message from "./src/models/MessageModel.js";
+
 
 const app = express();
 app.set("trust proxy", 1);
@@ -25,6 +29,7 @@ dbConnection();
 app.use(cors());
 
 app.use(express.json());
+const server = http.createServer(app);
 app.use(helmet());
 app.use(xss());
 app.use(mongoSanitize());
@@ -110,6 +115,131 @@ app.get("/", (req, res) => {
 });
 
 const PORT = process.env.PORT || 8000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+});
+
+
+
+
+
+// socket 
+const io = new Server(server);
+var users = {};
+io.on("connection", (socket) => {
+  console.log("connected to skip socket");
+  
+  console.log(socket.id);
+
+  socket.on("setup", (userData) => {
+    socket.join(userData.id);
+    console.log(userData);
+    socket.emit("connected");
+  });
+
+  socket.on("join chat", (room) => {
+    socket.join(room);
+    console.log("User Joined Room: " + room);
+  });
+
+  socket.on("typing", (room) => socket.in(room).emit("typing"));
+  socket.on("stop typing", (room) => socket.in(room).emit("stop typing"));
+
+  socket.on("new message", (newMessageRecieved) => {
+    console.log("chat",newMessageRecieved);
+    
+    var chat = newMessageRecieved.chat;
+    
+    if (!chat.users)  console.log("chat.users not defined");
+    
+    chat.users.forEach((user) => {
+      console.log(user);
+      if (user === newMessageRecieved.sender.id) return;
+      
+      console.log("done");
+      
+      socket.in(user).emit("message recieved", newMessageRecieved);
+    });
+  });
+
+
+
+socket.on("message:seen", async ({ messageId, chatId, userId }) => {
+
+  await Message.updateOne(
+    { id: messageId },
+    { $addToSet: { readBy: userId} }
+  );
+
+  socket.in(chatId).emit("message:seen:update", {
+    messageId,
+    userId
+  });
+
+});
+
+
+
+
+// for message reaction 
+socket.on(
+  "message:reaction",
+  async ({ messageId, emoji, userId, chatId }) => {
+    // 1️⃣ remove existing reaction by same user (if any)
+    await Message.updateOne(
+      { id: messageId },
+      { $pull: { reactions: { user: userId } } }
+    );
+
+    // 2️⃣ if user clicked emoji again, stop here (means un-react)
+    if (!emoji) {
+      socket.in(chatId).emit("message:reaction:update", {
+        messageId,
+        emoji: null,
+        userId
+      });
+      return;
+    }
+
+    // 3️⃣ add new reaction
+    await Message.updateOne(
+      { id: messageId },
+      { $push: { reactions: { emoji, user: userId } } }
+    );
+
+    // 4️⃣ broadcast to all users in chat
+    socket.in(chatId).emit("message:reaction:update", {
+      messageId,
+      emoji,
+      userId
+    });
+  }
+);
+
+
+
+
+
+
+
+
+  socket.off("setup", () => {
+    console.log("USER DISCONNECTED");
+    socket.leave(userData.id);
+  });
+ 
+
+  socket.on("disconnect", (userData) => {
+    console.log("USER DISCONNECTED");
+    socket.leave(userData.id);
+  });
+ 
+  // socket.on("disconnect", () => {
+  //   console.log("socket disconnected", socket.id);
+  //   delete users[socket.id];
+  //   io.emit("users-list", users);
+  // });
+
+
+
 });

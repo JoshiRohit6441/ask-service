@@ -27,12 +27,23 @@ import {
   allReviews ,
   getTransactions
 } from "../controller/vendor/AuthController.js";
-import { serviceDocumentUpload, userProfileUpload } from "../../utils/multer.js";
+import {
+  getDashboardStats,
+  unlockLead,
+  getLeadById,
+  submitQuote,
+  getCreditPackages,
+  getCreditBalance,
+  purchaseCredits,
+  getTransactionsList,
+} from "../controller/vendor/DashboardController.js";
+import { serviceDocumentUpload, userProfileUpload, quoteDocumentUpload, chatMediaUpload } from "../../utils/multer.js";
 import {
   authenticateForgotPasswordToken,
   checkRoleAuth,
   userAuthenticateToken,
 } from "../../middleware/auth.js";
+import ChatController from "../controller/user/ChatController.js";
 
 const router = express.Router();
 
@@ -102,11 +113,22 @@ router.get("/get-all-services-document-required", userAuthenticateToken, checkRo
 // update user's service data
 router.put("/update-service-data", userAuthenticateToken , checkRoleAuth(["Vendor"]) , updateUserServiceData);
 
-// upload service selection document
-router.get("/upload-service-selection-document",userAuthenticateToken ,serviceDocumentUpload, updateDocumentRequiredForService);
+// upload verification documents (fieldname = document_id per file)
+router.post("/upload-service-selection-document", userAuthenticateToken, checkRoleAuth(["Vendor"]), serviceDocumentUpload, updateDocumentRequiredForService);
+
+router.get("/dashboard", userAuthenticateToken, checkRoleAuth(["Vendor"]), getDashboardStats);
 
 router.get("/available-leads", userAuthenticateToken , checkRoleAuth(["Vendor"]) , availableLeads);
 router.get("/service/:id", userAuthenticateToken , checkRoleAuth(["Vendor"]) , singleService);
+router.get("/leads/:leadId", userAuthenticateToken, checkRoleAuth(["Vendor"]), getLeadById);
+router.post("/leads/:leadId/unlock", userAuthenticateToken, checkRoleAuth(["Vendor"]), unlockLead);
+router.post("/leads/:leadId/quotes", userAuthenticateToken, checkRoleAuth(["Vendor"]), quoteDocumentUpload, submitQuote);
+
+router.get("/credits/packages", userAuthenticateToken, checkRoleAuth(["Vendor"]), getCreditPackages);
+router.get("/credits/balance", userAuthenticateToken, checkRoleAuth(["Vendor"]), getCreditBalance);
+router.post("/credits/purchase", userAuthenticateToken, checkRoleAuth(["Vendor"]), purchaseCredits);
+
+router.get("/transactions", userAuthenticateToken, checkRoleAuth(["Vendor"]), getTransactionsList);
 
 
 router.get("/business-information", userAuthenticateToken , checkRoleAuth(["Vendor"]) , getBusinessInfo);
@@ -120,7 +142,10 @@ router.get("/all-review", userAuthenticateToken , checkRoleAuth(["Vendor"]) , al
 router.get("/all-transaction", userAuthenticateToken , checkRoleAuth(["Vendor"]) , getTransactions);
 
 
-
+router.get("/fetch-chats", userAuthenticateToken , checkRoleAuth(["Vendor"])  ,ChatController.fetchChats)
+router.post("/access-chat", userAuthenticateToken , checkRoleAuth(["Vendor"])  ,ChatController.accessChat)
+router.get("/all-messages/:chatId", userAuthenticateToken , checkRoleAuth(["Vendor"])  ,ChatController.allMessages)
+router.post("/send-msg", userAuthenticateToken , checkRoleAuth(["Vendor"]) , chatMediaUpload , ChatController.sendMessage)
 
 
 

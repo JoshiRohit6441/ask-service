@@ -2,7 +2,7 @@ import handleResponse from "../../../utils/http-response.js";
 import ServiceCategory from "../../models/ServiceCategoryModel.js";
 import ServiceDocumentRequirement from "../../models/ServiceDocumentRequirementModel.js";
 import TestimonialMaster from "../../models/TestimonialMasterModel.js";
-import TokenMaster from "../../models/TokenMasterModel.js";
+import CreditPackage from "../../models/CreditPackageModel.js";
 
 const buildListQuery = ({ search, status, isDeleted }) => {
   const query = {};
@@ -39,44 +39,48 @@ const getPagination = (req) => {
   return { page, limit, skip, isPaginationDisabled };
 };
 
-// create token purchase 
+// create credit package (token master)
 export const createTokenMaster = async (req, resp) => {
   try {
-    const token = await TokenMaster.create({
+    const payload = {
       ...req.body,
       createdBy: req.user._id,
-    });
-    return handleResponse(201, "Token master created successfully", token, resp);
+    };
+    if (payload.per_credit_price == null && payload.credits > 0 && payload.price != null) {
+      payload.per_credit_price = Number((payload.price / (payload.credits + (payload.bonus_credits || 0))).toFixed(2));
+    }
+    const creditPackage = await CreditPackage.create(payload);
+    return handleResponse(201, "Credit package created successfully", creditPackage, resp);
   } catch (err) {
     if (err?.code === 11000) {
-      return handleResponse(409, "Token title already exists", {}, resp);
+      return handleResponse(409, "Credit package name already exists", {}, resp);
     }
     return handleResponse(500, err.message, {}, resp);
   }
 };
 
-// get all tokens(deleted ,non deleted) with pagination and search
+// get all credit packages (deleted, non-deleted) with pagination and search
 export const getAllTokenMasters = async (req, resp) => {
   try {
     const { skip, page, limit, isPaginationDisabled } = getPagination(req);
     const query = buildListQuery(req.query);
 
-    let findQuery = TokenMaster.find(query).sort({ createdAt: -1 });
+    let findQuery = CreditPackage.find(query).sort({ sort_order: 1, createdAt: -1 });
 
     if (!isPaginationDisabled) {
       findQuery = findQuery.skip(skip).limit(limit);
     }
 
-    const [tokens, total] = await Promise.all([
-      findQuery,
-      TokenMaster.countDocuments(query),
+    const [list, total] = await Promise.all([
+      findQuery.lean(),
+      CreditPackage.countDocuments(query),
     ]);
 
     return handleResponse(
       200,
-      "Token masters fetched successfully",
+      "Credit packages fetched successfully",
       {
-        list: tokens,
+        list,
         pagination: isPaginationDisabled
           ? null
           : { total, page, limit, totalPages: Math.ceil(total / limit) },
@@ -88,73 +92,73 @@ export const getAllTokenMasters = async (req, resp) => {
   }
 };
 
-// get single token master by id
+// get single credit package by id
 export const getTokenMasterById = async (req, resp) => {
   try {
-    const token = await TokenMaster.findOne({ _id: req.params.id }).lean();
+    const creditPackage = await CreditPackage.findOne({ _id: req.params.id }).lean();
 
-    if (!token) {
-      return handleResponse(404, "Token master not found", {}, resp);
+    if (!creditPackage) {
+      return handleResponse(404, "Credit package not found", {}, resp);
     }
-    return handleResponse(200, "Token master fetched successfully", token, resp);
+    return handleResponse(200, "Credit package fetched successfully", creditPackage, resp);
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
   }
-}
+};
 
-// update token master
+// update credit package
 export const updateTokenMaster = async (req, resp) => {
   try {
-    const token = await TokenMaster.findOneAndUpdate(
+    const creditPackage = await CreditPackage.findOneAndUpdate(
       { _id: req.params.id, deletedAt: null },
       { $set: req.body },
       { new: true }
     );
 
-    if (!token) return handleResponse(404, "Token master not found", {}, resp);
+    if (!creditPackage) return handleResponse(404, "Credit package not found", {}, resp);
 
-    return handleResponse(200, "Token master updated successfully", token, resp);
+    return handleResponse(200, "Credit package updated successfully", creditPackage, resp);
   } catch (err) {
     if (err?.code === 11000) {
-      return handleResponse(409, "Token title already exists", {}, resp);
+      return handleResponse(409, "Credit package name already exists", {}, resp);
     }
     return handleResponse(500, err.message, {}, resp);
   }
 };
 
-// delete token master (soft delete)
+// delete credit package (soft delete)
 export const deleteTokenMaster = async (req, resp) => {
   try {
-    const token = await TokenMaster.findOneAndUpdate(
+    const creditPackage = await CreditPackage.findOneAndUpdate(
       { _id: req.params.id, deletedAt: null },
       { $set: { deletedAt: new Date() } },
       { new: true }
     );
 
-    if (!token) return handleResponse(404, "Token master not found", {}, resp);
+    if (!creditPackage) return handleResponse(404, "Credit package not found", {}, resp);
 
-    return handleResponse(200, "Token master deleted successfully", {}, resp);
+    return handleResponse(200, "Credit package deleted successfully", {}, resp);
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
   }
 };
 
-// restore deleted token master
+// restore deleted credit package
 export const restoreDeletedTokenMaster = async (req, resp) => {
   try {
-    const token = await TokenMaster.findOneAndUpdate(
+    const creditPackage = await CreditPackage.findOneAndUpdate(
       { _id: req.params.id, deletedAt: { $ne: null } },
       { $set: { deletedAt: null } },
       { new: true }
     );
 
-    if (!token) return handleResponse(404, "Token master not found or not deleted", {}, resp);
+    if (!creditPackage) return handleResponse(404, "Credit package not found or not deleted", {}, resp);
 
-    return handleResponse(200, "Token master restored successfully", token, resp);
+    return handleResponse(200, "Credit package restored successfully", creditPackage, resp);
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
   }
-}
+};
 
 
 

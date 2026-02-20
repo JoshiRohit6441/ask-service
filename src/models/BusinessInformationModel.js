@@ -61,6 +61,10 @@ const VendorDocumentSchema = new mongoose.Schema(
       trim: true,
     },
 
+    website_link : {
+       type : String 
+    }
+
 
   },
   {

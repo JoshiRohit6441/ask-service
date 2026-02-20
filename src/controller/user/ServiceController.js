@@ -13,9 +13,13 @@ import Role from "../../models/RoleModel.js";
 import ServiceCategory from "../../models/ServiceCategoryModel.js";
 import ServiceRequest from "../../models/ServiceRequestModel.js";
 import User from "../../models/UserModel.js";
+import VendorQuote from "../../models/VendorQuoteModel.js";
+import VendorReview from "../../models/VendorReviewModel.js";
+import BusinessInformation from "../../models/BusinessInformationModel.js";
 import moment from "moment";
 import mongoose from "mongoose";
 import crypto from "crypto";
+import Report from "../../models/ReportModel.js";
 
 // get service category list for users
 export const getUserServiceCategories = async (req, resp) => {
@@ -436,95 +440,100 @@ export const verifySignupLogin = async (req, resp) => {
   }
 };
 
-// get applied services
+// get created service requests (My Requests list) – filter by user, add quote count and status label
 export const getCreatedServiceRequests = async (req, resp) => {
   try {
+    const userId = req.user?._id;
+    if (!userId) return handleResponse(401, "Unauthorized", {}, resp);
+
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
     const { search, service, status, fromDate, toDate } = req.query;
 
-    const query = {};
+    const query = { user: userId, deletedAt: null };
 
     if (search) {
-      query.reference_no = { $regex: search, $options: "i" };
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { reference_no: { $regex: search, $options: "i" } },
+          { note: { $regex: search, $options: "i" } },
+        ],
+      });
     }
 
     if (service) {
-      query.$or = [
-        {
-          service_category: service,
-        },
-        {
-          child_category: service,
-        },
-      ];
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [{ service_category: service }, { child_category: service }],
+      });
     }
 
-    if (status) {
-      query.status = status;
+    if (status) query.status = status;
+    if (fromDate || toDate) {
+      query.createdAt = {};
+      if (fromDate) query.createdAt.$gte = new Date(fromDate);
+      if (toDate) query.createdAt.$lte = new Date(toDate);
     }
 
-    if (fromDate) query.createdAt = { $gte: new Date(fromDate) };
-    if (toDate) query.createdAt = { $lte: new Date(toDate) };
+    const isPaginateDisabled = page === 0 && limit === 0;
+    const skipNum = isPaginateDisabled ? 0 : skip;
+    const limitNum = isPaginateDisabled ? 0 : Math.min(100, Math.max(1, limit));
 
-    if (page == 0 && limit == 0) {
-      const service = await ServiceRequest.find(query)
+    const [requests, total] = await Promise.all([
+      ServiceRequest.find(query)
         .populate("service_category", "title description image options")
-        .populate("child_category", "title description image options");
+        .populate("child_category", "title description image options")
+        .sort({ createdAt: -1 })
+        .skip(skipNum)
+        .limit(limitNum || undefined)
+        .lean(),
+      ServiceRequest.countDocuments(query),
+    ]);
 
-      const fianalData = {
-        data: service,
-        pagination: {
-          total: service.length,
-          page,
-          limit,
-          totalPages: Math.ceil(service.length / limit),
-        },
+    const requestIds = requests.map((r) => r._id);
+    const quoteCounts = await VendorQuote.aggregate([
+      { $match: { service_request_id: { $in: requestIds }, status: "SENT" } },
+      { $group: { _id: "$service_request_id", count: { $sum: 1 } } },
+    ]);
+    const countByRequest = new Map(quoteCounts.map((q) => [q._id.toString(), q.count]));
+
+    const data = requests.map((r) => {
+      const quotesCount = countByRequest.get(r._id.toString()) || 0;
+      return {
+        ...r,
+        request_id: r.reference_no,
+        quotes_count: quotesCount,
+        status_label: quotesCount > 0 ? "Quotes received" : "Waiting for quotes",
+        location: [r.city, r.pincode].filter(Boolean).join(", ") || r.address_1,
       };
+    });
 
-      return handleResponse(
-        200,
-        "Services fetched successfully",
-        fianalData,
-        resp,
-      );
-    } else {
-      const [service, total] = await Promise.all([
-        ServiceRequest.find(query)
-          .populate("service_category", "title description image options")
-          .populate("child_category", "title description image options")
-          .skip(skip)
-          .limit(limit),
-        ServiceRequest.countDocuments(query),
-      ]);
+    const pagination = isPaginateDisabled
+      ? null
+      : { total, page, limit: limitNum, totalPages: Math.ceil(total / limitNum) };
 
-      const fianalData = {
-        data: service,
-        pagination: {
-          total,
-          page,
-          limit,
-          totalPages: Math.ceil(total / limit),
-        },
-      };
-      return handleResponse(
-        200,
-        "Services fetched successfully",
-        fianalData,
-        resp,
-      );
-    }
+    return handleResponse(200, "Service requests fetched successfully", { data, pagination }, resp);
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
   }
 };
 
-// close service request
+// Close request reasons (Figma modal)
+const CLOSE_REASONS = [
+  "No longer need the service",
+  "Found a provider elsewhere",
+  "Quotes are too expensive",
+  "Changed my mind",
+  "Other reason",
+];
+
+// close service request (with reason for "Close this request?" modal)
 export const closeServiceRequest = async (req, resp) => {
   try {
     const { id } = req.params;
-    const { reason } = req.body;
+    const { reason, reason_comment } = req.body;
 
     const serviceRequest = await ServiceRequest.findOne({
       _id: id,
@@ -537,12 +546,440 @@ export const closeServiceRequest = async (req, resp) => {
     if (serviceRequest.status !== "ACTIVE")
       return handleResponse(400, "Service request is not active", {}, resp);
 
-    serviceRequest.status = "CLOSED";
-    serviceRequest.reason = reason || null;
+    const reasonText = reason || null;
+    if (reasonText && !CLOSE_REASONS.includes(reasonText) && reasonText !== "Other reason") {
+      return handleResponse(400, "Invalid reason. Use one of: " + CLOSE_REASONS.join(", "), {}, resp);
+    }
+
+    serviceRequest.status = "CANCELLED";
+    serviceRequest.reason = reasonText === "Other reason" && reason_comment ? reason_comment : reasonText;
     await serviceRequest.save();
     return handleResponse(200, "Service request closed successfully", {}, resp);
   } catch (err) {
     return handleResponse(500, err.message, {}, resp);
+  }
+};
+
+// get list of quotes for a service request (Quotes for House Cleaning modal)
+export const getQuotesForServiceRequest = async (req, resp) => {
+  try {
+    const userId = req.user._id;
+    const requestId = req.params.id;
+    const { sort = "price_low_to_high" } = req.query;
+
+    const serviceRequest = await ServiceRequest.findOne({
+      _id: requestId,
+      user: userId,
+      deletedAt: null,
+    })
+      .populate("service_category", "title")
+      .lean();
+
+    if (!serviceRequest)
+      return handleResponse(404, "Service request not found", {}, resp);
+
+    let sortOption = { quote_price: 1 };
+    if (sort === "price_high_to_low") sortOption = { quote_price: -1 };
+    else if (sort === "newest") sortOption = { createdAt: -1 };
+    else if (sort === "oldest") sortOption = { createdAt: 1 };
+
+    const quotes = await VendorQuote.find({
+      service_request_id: requestId,
+      status: "SENT",
+    })
+      .populate("vendor_id", "first_name last_name profile_pic")
+      .sort(sortOption)
+      .lean();
+
+    const vendorIds = [...new Set(quotes.map((q) => q.vendor_id?._id?.toString()).filter(Boolean))];
+    const reviewStats = await VendorReview.aggregate([
+      { $match: { vendor: { $in: vendorIds.map((id) => new mongoose.Types.ObjectId(id)) }, status: "ACTIVE" } },
+      { $group: { _id: "$vendor", rating: { $avg: "$rating" }, count: { $sum: 1 } } },
+    ]);
+    const statsByVendor = new Map(reviewStats.map((s) => [s._id.toString(), s]));
+
+    const businessList = await BusinessInformation.find({ user_id: { $in: vendorIds } }).lean();
+    const businessByVendor = new Map(businessList.map((b) => [b.user_id.toString(), b]));
+
+    const requestCreated = serviceRequest.createdAt ? new Date(serviceRequest.createdAt).getTime() : 0;
+    const list = quotes.map((q) => {
+      const vendor = q.vendor_id;
+      const vid = vendor?._id?.toString();
+      const stats = statsByVendor.get(vid) || {};
+      const business = businessByVendor.get(vid);
+      const quoteCreated = q.createdAt ? new Date(q.createdAt).getTime() : 0;
+      const respondedInHours = requestCreated ? ((quoteCreated - requestCreated) / (1000 * 60 * 60)).toFixed(1) : null;
+      return {
+        _id: q._id,
+        quote_id: q._id,
+        vendor_id: vid,
+        provider_name: business?.business_name || (vendor ? `${vendor.first_name || ""} ${vendor.last_name || ""}`.trim() : "Vendor"),
+        rating: stats.rating ? Number(stats.rating.toFixed(1)) : null,
+        reviews_count: stats.count || 0,
+        service_description: q.service_description,
+        responded_in_hours: respondedInHours,
+        price: q.quote_price,
+        currency: q.currency || "EUR",
+        price_display: `${q.currency || "EUR"}${q.quote_price} per visit`,
+        available_start_date: q.available_start_date,
+      };
+    });
+
+    return handleResponse(200, "Quotes fetched successfully", {
+      request: {
+        _id: serviceRequest._id,
+        request_id: serviceRequest.reference_no,
+        service_title: serviceRequest.service_category?.title,
+        date: serviceRequest.createdAt,
+        location: [serviceRequest.city, serviceRequest.pincode].filter(Boolean).join(", ") || serviceRequest.address_1,
+        quotes_count: list.length,
+      },
+      quotes: list,
+    }, resp);
+  } catch (err) {
+    return handleResponse(500, err.message, {}, resp);
+  }
+};
+
+// get single quote details (View details modal – provider, rating, description, included/not included, availability)
+export const getQuoteDetails = async (req, resp) => {
+  try {
+    const userId = req.user._id;
+    const { id: requestId, quoteId } = req.params;
+
+    const serviceRequest = await ServiceRequest.findOne({
+      _id: requestId,
+      user: userId,
+      deletedAt: null,
+    })
+      .populate("service_category", "title")
+      .lean();
+
+    if (!serviceRequest)
+      return handleResponse(404, "Service request not found", {}, resp);
+
+    const quote = await VendorQuote.findOne({
+      _id: quoteId,
+      service_request_id: requestId,
+      status: "SENT",
+    })
+      .populate("vendor_id", "first_name last_name profile_pic email")
+      .lean();
+
+    if (!quote) return handleResponse(404, "Quote not found", {}, resp);
+
+    const vendorId = quote.vendor_id?._id || quote.vendor_id;
+    const [stats, business] = await Promise.all([
+      VendorReview.aggregate([
+        { $match: { vendor: vendorId, status: "ACTIVE" } },
+        { $group: { _id: null, rating: { $avg: "$rating" }, count: { $sum: 1 } } },
+      ]),
+      BusinessInformation.findOne({ user_id: vendorId }).lean(),
+    ]);
+
+    const rating = stats[0]?.rating ? Number(stats[0].rating.toFixed(1)) : null;
+    const reviewsCount = stats[0]?.count || 0;
+    const vendor = quote.vendor_id;
+    const providerName = business?.business_name || (vendor ? `${vendor.first_name || ""} ${vendor.last_name || ""}`.trim() : "Vendor");
+
+    const baseUrl = process.env.IMAGE_URL || "";
+    const attachmentUrl = quote.attachment_url
+      ? (baseUrl + (quote.attachment_url.startsWith("/") ? quote.attachment_url : quote.attachment_url))
+      : null;
+
+    return handleResponse(200, "Quote details fetched successfully", {
+      quote: {
+        _id: quote._id,
+        quote_price: quote.quote_price,
+        currency: quote.currency || "EUR",
+        service_description: quote.service_description,
+        available_start_date: quote.available_start_date,
+        quote_valid_days: quote.quote_valid_days,
+        attachment_url: attachmentUrl,
+      },
+      vendor: {
+        _id: vendor._id,
+        provider_name: providerName,
+        rating,
+        reviews_count: reviewsCount,
+        years_in_business: business?.years_of_activity || null,
+      },
+      request: {
+        request_id: serviceRequest.reference_no,
+        service_title: serviceRequest.service_category?.title,
+      },
+    }, resp);
+  } catch (err) {
+    return handleResponse(500, err.message, {}, resp);
+  }
+};
+
+// ignore quote (user declines / "Ignore quote" button)
+export const ignoreQuote = async (req, resp) => {
+  try {
+    const userId = req.user._id;
+    const { id: requestId, quoteId } = req.params;
+
+    const serviceRequest = await ServiceRequest.findOne({ _id: requestId, user: userId });
+    if (!serviceRequest) return handleResponse(404, "Service request not found", {}, resp);
+
+    const quote = await VendorQuote.findOne({
+      _id: quoteId,
+      service_request_id: requestId,
+      status: "SENT",
+    });
+    if (!quote) return handleResponse(404, "Quote not found", {}, resp);
+
+    quote.status = "IGNORED";
+    await quote.save();
+
+    return handleResponse(200, "Quote ignored successfully", {}, resp);
+  } catch (err) {
+    return handleResponse(500, err.message, {}, resp);
+  }
+};
+
+// accept quote (user accepts a quote)
+export const acceptQuote = async (req, resp) => {
+  try {
+    const userId = req.user._id;
+    const { id: requestId, quoteId } = req.params;
+
+    const serviceRequest = await ServiceRequest.findOne({ _id: requestId, user: userId });
+    if (!serviceRequest) return handleResponse(404, "Service request not found", {}, resp);
+
+    const quote = await VendorQuote.findOne({
+      _id: quoteId,
+      service_request_id: requestId,
+      status: "SENT",
+    });
+    if (!quote) return handleResponse(404, "Quote not found", {}, resp);
+
+    quote.status = "ACCEPTED";
+    await quote.save();
+
+    return handleResponse(200, "Quote accepted successfully", { quote_id: quote._id }, resp);
+  } catch (err) {
+    return handleResponse(500, err.message, {}, resp);
+  }
+};
+
+
+export const submitReview = async (req, res) => {
+  try {
+    const customerId = req.user._id;
+    const { service_request_id, vendor, rating, review } = req.body;
+
+    // Basic validation
+    if (!service_request_id || !vendor || !rating) {
+      return handleResponse(
+        400,
+        "service_request_id, vendor and rating are required",
+        {},
+        res
+      );
+    }
+
+    if (rating < 1 || rating > 5) {
+      return handleResponse(
+        400,
+        "Rating must be between 1 and 5",
+        {},
+        res
+      );
+    }
+
+    // Check if already reviewed
+    const existingReview = await VendorReview.findOne({
+      user: customerId,
+      service_request_id,
+      vendor,
+    });
+
+    if (existingReview) {
+      return handleResponse(
+        409,
+        "You have already submitted a review for this service",
+        {},
+        res
+      );
+    }
+
+    // Optional: Check if service exists
+    const serviceRequest = await ServiceRequest.findById(service_request_id);
+    if (!serviceRequest) {
+      return handleResponse(404, "Service request not found", {}, res);
+    }
+
+    const newReview = await VendorReview.create({
+      user: customerId,
+      service_request_id,
+      vendor,
+      rating,
+      review,
+    });
+
+    const populated = await VendorReview.findById(newReview._id)
+      .populate("user", "first_name last_name profile_pic")
+      .populate("vendor", "first_name last_name")
+      .populate("service_request_id", "reference_no")
+      .lean();
+
+    return handleResponse(
+      201,
+      "Review submitted successfully",
+      populated,
+      res
+    );
+  } catch (error) {
+    return handleResponse(500, error.message, {}, res);
+  }
+};
+
+
+  export const vendorDetails = async (req, resp) => {
+  try {
+    const userId = req.user._id;
+    const { id } = req.params;
+
+    const vendor = await User.findById(id);
+    if (!vendor) return handleResponse(404, "Vendor not found", {}, resp);
+
+
+    const businessInformation = await BusinessInformation.findOne({user_id:vendor._id});
+
+       const reviews = await VendorReview.find({
+          vendor: vendor._id,
+        })
+          .populate("user", "first_name last_name profile_pic email")
+          .sort({ createdAt: -1 })
+          .lean();
+    
+        const totalReviews = reviews.length;
+    
+        // Calculate average rating
+        const averageRating =
+          totalReviews > 0
+            ? (
+                reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / totalReviews
+              ).toFixed(1)
+            : 0;
+    
+        // Rating distribution
+        const ratingDistribution = {
+          5: 0,
+          4: 0,
+          3: 0,
+          2: 0,
+          1: 0,
+        };
+    
+        reviews.forEach((review) => {
+          if (review.rating >= 1 && review.rating <= 5) {
+            ratingDistribution[review.rating]++;
+          }
+        });
+    
+
+      let review = {
+            averageRating: Number(averageRating),
+        totalReviews,
+        ratingDistribution,
+        reviews,
+      }
+
+    return handleResponse(200, "Vendor Detail", { vendor , businessInformation , review}, resp);
+
+  } catch (err) {
+    return handleResponse(500, err.message, {}, resp);
+  }
+};
+
+export const toggleReviewLike = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const reviewId = req.params.id;
+
+    const review = await VendorReview.findById(reviewId);
+
+    if (!review) {
+      return handleResponse(404, "Review not found", {}, res);
+    }
+
+    const alreadyLiked = review.likes.includes(userId);
+
+    if (alreadyLiked) {
+      // 🔹 Unlike
+      review.likes = review.likes.filter(
+        (id) => id.toString() !== userId.toString()
+      );
+      review.likes_count = review.likes.length;
+
+      await review.save();
+
+      return handleResponse(
+        200,
+        "Review unliked successfully",
+        { liked: false, likes_count: review.likes_count },
+        res
+      );
+    }
+
+    // 🔹 Like
+    review.likes.push(userId);
+    review.likes_count = review.likes.length;
+
+    await review.save();
+
+    return handleResponse(
+      200,
+      "Review liked successfully",
+      { liked: true, likes_count: review.likes_count },
+      res
+    );
+  } catch (error) {
+    return handleResponse(500, error.message, {}, res);
+  }
+};
+
+export const reportUser = async (req, res) => {
+  try {
+    const reporterId = req.user._id;
+    const { reported_user, reason, description } = req.body;
+
+    if (reporterId.toString() === reported_user) {
+      return handleResponse(400, "You cannot report yourself", {}, res);
+    }
+
+    const existingReport = await Report.findOne({
+      reporter: reporterId,
+      reported_user,
+    });
+
+    if (existingReport) {
+      return handleResponse(
+        400,
+        "You have already reported this user",
+        {},
+        res
+      );
+    }
+
+    const report = await Report.create({
+      reporter: reporterId,
+      reported_user,
+      reason,
+      description,
+    });
+
+    return handleResponse(
+      201,
+      "vendor reported successfully",
+      report,
+      res
+    );
+  } catch (error) {
+    return handleResponse(500, error.message, {}, res);
   }
 };
 

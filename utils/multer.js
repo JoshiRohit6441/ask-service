@@ -9,3 +9,12 @@ export const serviceCategoryUpload=serviceCategory.fields([{name:"image",maxCoun
 
 const serviceDocument=fileUpload("public/document")
 export const serviceDocumentUpload=serviceDocument.any();
+
+const quoteDocument=fileUpload("public/quote-document");
+export const quoteDocumentUpload=quoteDocument.fields([{ name: "attachment", maxCount: 1 }]);
+
+
+const chatPath = fileUpload("public/chat");
+export const chatMediaUpload = chatPath.fields([
+  { name: "media" },
+]);

@@ -27,10 +27,33 @@ const TransactionModel = mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "completed", "failed"],
+      enum: ["pending", "completed", "failed", "refunded"],
+    },
+    amount_paid: {
+      type: Number,
+      default: null,
+    },
+    currency: {
+      type: String,
+      default: "EUR",
     },
     description: {
       type: String,
+      default: null,
+    },
+  
+    balance_after: {
+      type: Number,
+      default: null,
+    },
+
+    reference_type: {
+      type: String,
+      enum: ["lead_unlock", "credit_purchase", "adjustment"],
+      default: null,
+    },
+    reference_id: {
+      type: mongoose.Schema.Types.ObjectId,
       default: null,
     },
   },

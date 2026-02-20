@@ -18,6 +18,10 @@ const VendorDocumentSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    file_name: {
+      type: String,
+      default: null,
+    },
     name: {
       type: String,
     },

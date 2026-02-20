@@ -108,10 +108,24 @@ export const updateServiceCategoryValidation = [
 ];
 
 export const createTokenMasterValidation = [
-  body("title").notEmpty().withMessage("Title is required"),
-  body("token_value")
+  body("name").notEmpty().trim().withMessage("Name is required"),
+  body("credits")
+    .isInt({ min: 1 })
+    .withMessage("Credits must be at least 1"),
+  body("bonus_credits")
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage("Bonus credits must be 0 or greater"),
+  body("price")
     .isFloat({ min: 0 })
-    .withMessage("Token value must be greater than or equal to 0"),
+    .withMessage("Price must be 0 or greater"),
+  body("currency").optional().isString().trim().withMessage("Currency must be string"),
+  body("per_credit_price")
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage("Per credit price must be 0 or greater"),
+  body("is_most_popular").optional().isBoolean().withMessage("is_most_popular must be boolean"),
+  body("sort_order").optional().isInt({ min: 0 }).withMessage("sort_order must be non-negative integer"),
   body("status")
     .optional()
     .isIn(["ACTIVE", "INACTIVE"])
@@ -120,11 +134,26 @@ export const createTokenMasterValidation = [
 ];
 
 export const updateTokenMasterValidation = [
-  body("title").optional().notEmpty().withMessage("Title cannot be empty"),
-  body("token_value")
+  body("name").optional().notEmpty().trim().withMessage("Name cannot be empty"),
+  body("credits")
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage("Credits must be at least 1"),
+  body("bonus_credits")
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage("Bonus credits must be 0 or greater"),
+  body("price")
     .optional()
     .isFloat({ min: 0 })
-    .withMessage("Token value must be greater than or equal to 0"),
+    .withMessage("Price must be 0 or greater"),
+  body("currency").optional().isString().trim().withMessage("Currency must be string"),
+  body("per_credit_price")
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage("Per credit price must be 0 or greater"),
+  body("is_most_popular").optional().isBoolean().withMessage("is_most_popular must be boolean"),
+  body("sort_order").optional().isInt({ min: 0 }).withMessage("sort_order must be non-negative integer"),
   body("status")
     .optional()
     .isIn(["ACTIVE", "INACTIVE"])

@@ -7,6 +7,11 @@ const VendorReviewSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    service_request_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceRequest",
+    },
+
     vendor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -28,17 +33,25 @@ const VendorReviewSchema = new mongoose.Schema(
       enum: ["ACTIVE", "INACTIVE"],
       default: "ACTIVE",
     },
-    deletedAt: {
-      type: Date,
-      default: null,
+    
+      likes: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    likes_count: {
+      type: Number,
+      default: 0,
     },
+
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 VendorReviewSchema.index(
   { user: 1, vendor: 1 },
-  { unique: true, partialFilterExpression: { deletedAt: null } }
+  { unique: true, partialFilterExpression: { deletedAt: null } },
 );
 
 const VendorReview = mongoose.model("VendorReview", VendorReviewSchema);

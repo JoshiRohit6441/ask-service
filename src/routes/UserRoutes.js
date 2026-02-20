@@ -1,11 +1,19 @@
 import express from "express";
 import handleResponse from "../../utils/http-response.js";
 import {
+  acceptQuote,
   closeServiceRequest,
   getCreatedServiceRequests,
+  getQuoteDetails,
+  getQuotesForServiceRequest,
   getUserServiceCategories,
+  ignoreQuote,
   initiateServiceRequest,
   verifySignupLogin,
+  submitReview ,
+  vendorDetails ,
+  toggleReviewLike ,
+  reportUser
 } from "../controller/user/ServiceController.js";
 import {
   authenticateForgotPasswordToken,
@@ -33,7 +41,8 @@ import {
     saveNotificationPreferences ,
   getNotificationPreferences ,
 } from "../controller/user/AuthController.js";
-import { userProfileUpload } from "../../utils/multer.js";
+import { chatMediaUpload, userProfileUpload } from "../../utils/multer.js";
+import ChatController from "../controller/user/ChatController.js";
 
 const router = express.Router();
 
@@ -59,14 +68,42 @@ router.get(
   getCreatedServiceRequests,
 );
 
-// close service request
-router.post(
+// close service request (body: reason, optional reason_comment for "Other reason")
+router.put(
   "/close-service-request/:id",
   userAuthenticateToken,
   checkRoleAuth(["User"]),
   closeServiceRequest,
 );
 
+// quotes for a service request (modal "Quotes for House Cleaning")
+router.get(
+  "/service-requests/:id/quotes",
+  userAuthenticateToken,
+  checkRoleAuth(["User"]),
+  getQuotesForServiceRequest,
+);
+// single quote details (modal "View details")
+router.get(
+  "/service-requests/:id/quotes/:quoteId",
+  userAuthenticateToken,
+  checkRoleAuth(["User"]),
+  getQuoteDetails,
+);
+// ignore quote
+router.post(
+  "/service-requests/:id/quotes/:quoteId/ignore",
+  userAuthenticateToken,
+  checkRoleAuth(["User"]),
+  ignoreQuote,
+);
+// accept quote
+router.post(
+  "/service-requests/:id/quotes/:quoteId/accept",
+  userAuthenticateToken,
+  checkRoleAuth(["User"]),
+  acceptQuote,
+);
 
 // ==============================AUTH=================================
 
@@ -123,6 +160,13 @@ router.get(
 router.get("/notification", userAuthenticateToken , checkRoleAuth(["User"]) , getNotificationPreferences);
 router.put("/notification", userAuthenticateToken , checkRoleAuth(["User"]) , saveNotificationPreferences);
 
+router.post("/submit-review", userAuthenticateToken , checkRoleAuth(["User"]) , submitReview);
+router.put("/like-review/:id", userAuthenticateToken , checkRoleAuth(["User"]) ,toggleReviewLike );
+
+router.get("/vendor-details/:id", userAuthenticateToken , checkRoleAuth(["User"]) , vendorDetails);
+router.post("/report-vendor", userAuthenticateToken , checkRoleAuth(["User"]) , reportUser);
+
+
 // forgot password
 router.post("/forgot-password", forgotPassword);
 
@@ -136,6 +180,20 @@ router.post("/verify-forgot-password-otp", verifyOTP);
 router.post("/reset-password", authenticateForgotPasswordToken("forgot-password"), resetPassword);
 
 router.get("/test", (req, res) => { return handleResponse(200, "User route is working fine", {}, res); }) ;
+
+
+
+// chat 
+
+router.get("/fetch-chats", userAuthenticateToken , checkRoleAuth(["User"])  ,ChatController.fetchChats)
+router.post("/access-chat", userAuthenticateToken , checkRoleAuth(["User"])  ,ChatController.accessChat)
+router.get("/all-messages/:chatId", userAuthenticateToken , checkRoleAuth(["User"])  ,ChatController.allMessages)
+router.post("/send-msg", userAuthenticateToken , checkRoleAuth(["User"]) , chatMediaUpload , ChatController.sendMessage)
+
+router.post("/react-message", userAuthenticateToken , checkRoleAuth(["User"])  , ChatController.reactToMessage)
+router.put("/read-all-message/:chatId", userAuthenticateToken , checkRoleAuth(["User"])  , ChatController.MarkAllMessagesSeen)
+router.put("/read-message/:id", userAuthenticateToken , checkRoleAuth(["User"])  , ChatController.MarkMessagesSeen)
+router.get("/single-chat/:id", userAuthenticateToken , checkRoleAuth(["User"])  , ChatController.singleChat)
 
 
 
